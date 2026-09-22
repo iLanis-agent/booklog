@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BookLog</title>
+<style>
+  :root { --bg:#f7f5f1; --card:#fff; --ink:#2a241d; --muted:#8d8377; --brown:#8a5a2e; --green:#3d8a4f; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:ui-sans-serif,system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:20px 24px 8px; }
+  h1 { margin:0; font-size:1.5rem; }
+  .sub { color:var(--muted); margin:4px 0 0; font-size:.9rem; }
+  main { max-width:720px; margin:0 auto; padding:12px 16px 40px; }
+  form { background:var(--card); border-radius:12px; padding:14px; display:flex; gap:8px; flex-wrap:wrap; align-items:end; margin-bottom:14px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  label { font-size:.75rem; color:var(--muted); display:block; margin-bottom:3px; }
+  input, button { font:inherit; padding:8px 10px; border:1px solid #ddd4c7; border-radius:8px; background:#fff; }
+  input[type=text] { flex:1; min-width:160px; }
+  input[type=number] { width:110px; }
+  button { background:var(--brown); color:#fff; border:none; cursor:pointer; }
+  button.ghost { background:#efe9df; color:var(--ink); }
+  .card { background:var(--card); border-radius:12px; padding:14px 16px; margin-bottom:10px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+  .title { font-weight:600; font-size:1.05rem; }
+  .tag { font-size:.72rem; font-weight:700; padding:3px 9px; border-radius:999px; text-transform:uppercase; }
+  .t-reading { background:#f4e8d8; color:#8a5a2e; }
+  .t-finished { background:#e0f0e2; color:#2e6b2e; }
+  .t-not { background:#ece7de; color:#8d8377; }
+  .bar { height:8px; background:#eee7db; border-radius:999px; overflow:hidden; margin:10px 0 4px; }
+  .bar > div { height:100%; background:var(--brown); transition:width .2s; }
+  .meta { font-size:.85rem; color:var(--muted); }
+  .proj { color:var(--green); font-weight:600; }
+  .log-row { display:flex; gap:8px; margin-top:10px; align-items:end; flex-wrap:wrap; }
+  .empty { text-align:center; color:var(--muted); padding:40px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>BookLog</h1>
+  <p class="sub">Log the page you're on; get your real reading pace and the date you'll finish each book.</p>
+</header>
+<main>
+  <form id="add-form">
+    <div style="flex:1;min-width:160px"><label>Book title</label><input type="text" id="f-title" placeholder="Book title" required maxlength="80"></div>
+    <div><label>Total pages</label><input type="number" id="f-pages" min="1" max="100000" placeholder="320" required></div>
+    <button type="submit">Add book</button>
+  </form>
+  <div id="list"></div>
+</main>
+<script src="engine.js"></script>
+<script>
+(function () {
+  var KEY = 'booklog-v1';
+  function today() { return new Date().toISOString().slice(0, 10); }
+  function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } }
+  function save() { localStorage.setItem(KEY, JSON.stringify(books)); }
+  var books = load();
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function render() {
+    var wrap = document.getElementById('list');
+    wrap.innerHTML = '';
+    if (!books.length) {
+      wrap.innerHTML = '<div class="empty">No books yet. Add what you\'re reading - pace and finish dates appear after two check-ins.</div>';
+      return;
+    }
+    books.forEach(function (b) {
+      var st = BookLog.status(b);
+      var proj = BookLog.projection(b, today());
+      var card = el('div', 'card');
+      var top = el('div', 'row');
+      top.appendChild(el('span', 'title', b.title));
+      var tag = el('span', 'tag ' + (st === 'finished' ? 't-finished' : st === 'reading' ? 't-reading' : 't-not'), st);
+      top.appendChild(tag);
+      card.appendChild(top);
+
+      var pct = b.totalPages ? Math.round((b.currentPage / b.totalPages) * 100) : 0;
+      var bar = el('div', 'bar');
+      var fill = el('div'); fill.style.width = pct + '%';
+      bar.appendChild(fill);
+      card.appendChild(bar);
+
+      var meta = el('div', 'meta');
+      var line = 'Page ' + b.currentPage + ' of ' + b.totalPages + ' (' + pct + '%)';
+      if (proj.pace) line += ' - pace ' + proj.pace + ' pages/day';
+      meta.textContent = line;
+      card.appendChild(meta);
+      if (proj.finishDate) {
+        card.appendChild(el('div', 'meta proj', 'On track to finish ' + proj.finishDate + ' (' + proj.daysLeft + ' days left)'));
+      } else if (st === 'reading' && !proj.pace) {
+        card.appendChild(el('div', 'meta', 'Log pages on two different days to get a pace.'));
+      }
+
+      if (st !== 'finished') {
+        var row = el('div', 'log-row');
+        var pd = el('div');
+        pd.appendChild(el('label', null, 'I\'m on page'));
+        var inp = el('input'); inp.type = 'number'; inp.min = 0; inp.max = b.totalPages; inp.placeholder = String(b.currentPage);
+        pd.appendChild(inp);
+        row.appendChild(pd);
+        var btn = el('button', 'ghost', 'Log page');
+        btn.onclick = function () {
+          try { BookLog.logPage(b, today(), inp.value); }
+          catch (e) { alert(e.message); return; }
+          save(); render();
+        };
+        row.appendChild(btn);
+        card.appendChild(row);
+      }
+
+      var del = el('button', 'ghost', 'Remove');
+      del.style.marginTop = '10px';
+      del.onclick = function () {
+        if (!confirm('Remove "' + b.title + '"?')) return;
+        BookLog.removeBook(books, b.id); save(); render();
+      };
+      card.appendChild(del);
+      wrap.appendChild(card);
+    });
+  }
+
+  document.getElementById('add-form').onsubmit = function (e) {
+    e.preventDefault();
+    try {
+      BookLog.addBook(books,
+        document.getElementById('f-title').value,
+        document.getElementById('f-pages').value);
+    } catch (err) { alert(err.message); return; }
+    document.getElementById('f-title').value = '';
+    document.getElementById('f-pages').value = '';
+    save(); render();
+  };
+  render();
+})();
+</script>
+</body>
+</html>
